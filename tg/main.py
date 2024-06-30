@@ -23,6 +23,16 @@ class Form(StatesGroup):
     name = State()
     student_id = State()
 
+
+groups = ["ПрИ-101", "ПрИ-201", "ПрИ-301", "ПрИ-401",
+          "ПИ-101", "ПИ-201", "ПИ-301", "ПИ-401",
+          "БИ-101", "БИ-201", "БИ-301", "БИ-401",
+          "ПрИ-102", "ПрИ-103", "ПрИ-202", "ПрИ-203",
+          "ПИ-102", "ПИ-103", "ПИ-202", "ПИ-203",
+          "БИ-102", "БИ-103", "БИ-202", "БИ-203"]
+with open('groups.txt', 'r', encoding='utf-8') as f:
+    groups = [line.strip() for line in f.readlines()]
+
 # Keyboards
 main_b = [
     [KeyboardButton(text="Верификация")],
@@ -44,6 +54,12 @@ main_kb = ReplyKeyboardMarkup(keyboard=main_b, resize_keyboard=True)
 verification_kb = InlineKeyboardMarkup(inline_keyboard=verification_b)
 faq_kb = InlineKeyboardMarkup(inline_keyboard=faq_b)
 notifications_kb = InlineKeyboardMarkup(inline_keyboard=notifications_b)
+groups_kb = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text=group, callback_data=group) for group in groups[i:i+3]]
+        for i in range(0, len(groups), 3)
+    ]
+)
 
 
 # Start command handler
@@ -54,23 +70,24 @@ async def send_welcome(message: types.Message):
 
 
 # Verification process
-@dp.message(F.text=="Верификация")
+@dp.message(F.text == "Верификация")
 async def process_verification(message: types.Message):
     await message.answer("Для доступа к функциям, пожалуйста, пройдите верификацию.", reply_markup=verification_kb)
 
 
-#в будущем изменить
-@dp.callback_query(F.data=="fill_form")
+# в будущем изменить
+@dp.callback_query(F.data == "fill_form")
 async def fill_form(callback_query: types.CallbackQuery, state: FSMContext):
     await state.set_state(Form.group)
-    await bot.send_message(callback_query.from_user.id, "Пожалуйста, введите вашу группу:")
+    await bot.send_message(callback_query.from_user.id, "Пожалуйста, выберите вашу группу:", reply_markup=groups_kb)
 
 
-@dp.message(Form.group)
-async def process_group(message: Message, state: FSMContext):
-    await state.update_data(group=message.text)
+@dp.callback_query()
+async def process_group(callback_query: types.CallbackQuery, state: FSMContext):
+    group = callback_query.data
+    await state.update_data(group=group)
     await state.set_state(Form.name)
-    await message.answer("Пожалуйста, введите ваше ФИО:")
+    await bot.send_message(callback_query.from_user.id, "Пожалуйста, введите ваше ФИО:")
 
 
 @dp.message(Form.name)
@@ -80,7 +97,7 @@ async def process_name(message: types.Message, state: FSMContext):
     await message.answer("Пожалуйста, отправьте фотографию вашего студенческого билета:")
 
 
-@dp.message(Form.student_id,F.photo)
+@dp.message(Form.student_id, F.photo)
 async def process_student_id(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     group = user_data['group']
@@ -93,18 +110,18 @@ async def process_student_id(message: types.Message, state: FSMContext):
 
 
 # FAQ process
-@dp.message(F.text=="FAQ")
+@dp.message(F.text == "FAQ")
 async def process_faq(message: types.Message):
     await message.answer("Выберите опцию:", reply_markup=faq_kb)
 
 
-@dp.callback_query(F.data=="view_all")
+@dp.callback_query(F.data == "view_all")
 async def view_all(callback_query: types.CallbackQuery):
     # Fetch and display all FAQs
     await bot.send_message(callback_query.from_user.id, "Список всех вопросов и ответов...")
 
 
-@dp.callback_query(F.data=="request")
+@dp.callback_query(F.data == "request")
 async def request_faq(callback_query: types.CallbackQuery):
     await bot.send_message(callback_query.from_user.id, "Введите ваш запрос:")
 
@@ -117,18 +134,18 @@ async def search_faq(message: types.Message):
 
 
 # Notifications process
-@dp.message(F.text=="Уведомления")
+@dp.message(F.text == "Уведомления")
 async def process_notifications(message: types.Message):
     await message.answer("Выберите опцию:", reply_markup=notifications_kb)
 
 
-@dp.callback_query(F.data=="show_unread")
+@dp.callback_query(F.data == "show_unread")
 async def show_unread(callback_query: types.CallbackQuery):
     # Fetch and display unread notifications
     await bot.send_message(callback_query.from_user.id, "Непрочитанные уведомления...")
 
 
-@dp.callback_query(F.data=="show_all")
+@dp.callback_query(F.data == "show_all")
 async def show_all(callback_query: types.CallbackQuery):
     # Fetch and display all notifications
     await bot.send_message(callback_query.from_user.id, "Все уведомления...")
