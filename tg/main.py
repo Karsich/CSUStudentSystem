@@ -84,7 +84,7 @@ async def send_welcome(message: types.Message):
 async def select_course(callback_query: types.CallbackQuery):
     courses_kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"{i} курс", callback_data=f"choose_course_{i}")] for i in range(1, 6)
+            [InlineKeyboardButton(text=f"{i} курс", callback_data=f"choose_course_{i}")] for i in range(1, 5)
         ]
     )
     await bot.send_message(callback_query.from_user.id, "Выберите курс:", reply_markup=courses_kb)
@@ -232,7 +232,7 @@ async def process_question_photo(message: types.Message, state: FSMContext):
 
     ticket_data = {
         'type_ticket': 'request',
-        'tgchat_id': 111123333333333,
+        'tgchat_id': tg_chat,
         'message': question,
     }
     response = await api_service.submit_ticket(ticket_data, photo_bytes, 'question_photo.jpg')
