@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -47,14 +47,20 @@ class Form(StatesGroup):
     name = State()
     student_id = State()
     question = State()
+    add_photo = State()
+    question_photo = State()
 
 main_b = [
     [InlineKeyboardButton(text="Подать заявку в группу", callback_data='select_course')],
-    [InlineKeyboardButton(text="FAQ", callback_data='FAQ')],
-    [InlineKeyboardButton(text="Задать вопрос администратору", callback_data='ask_admin')]
+    [InlineKeyboardButton(text="FAQ", callback_data='FAQ')]
+]
+main_auth_b = [
+    [InlineKeyboardButton(text="Задать вопрос администратору", callback_data='ask_admin')],
+    [InlineKeyboardButton(text="FAQ", callback_data='FAQ')]
 ]
 
 main_kb = InlineKeyboardMarkup(inline_keyboard=main_b)
+main_auth_kb = InlineKeyboardMarkup(inline_keyboard=main_auth_b)
 
 @dp.message(CommandStart())
 async def send_welcome(message: types.Message):
@@ -64,7 +70,7 @@ async def send_welcome(message: types.Message):
             data = response.json()
             if data:
                 await message.answer("Привет! Это информационная система для института. Пожалуйста, выберите опцию.",
-                                     reply_markup=types.ReplyKeyboardMarkup(keyboard=[[types.KeyboardButton(text="Уведомления")]], resize_keyboard=True))
+                                     reply_markup=main_auth_kb)
             else:
                 await message.answer("Привет! Это информационная система для института. Пожалуйста, выберите опцию.",
                                      reply_markup=main_kb)
@@ -118,13 +124,20 @@ async def process_name(message: types.Message, state: FSMContext):
     await state.set_state(Form.student_id)
     await message.answer("Пожалуйста, отправьте фотографию вашего студенческого билета:")
 
-@dp.message(Form.student_id, lambda message: message.photo)
+@dp.message(Form.student_id, F.photo)
 async def process_student_id(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     group = user_data['group']
     name = user_data['name']
-    student_id_photo = message.photo[-1].file_id
+    student_id_photo = message.photo[-1]
     tg_chat = message.chat.id
+
+    photo_file = await bot.get_file(student_id_photo.file_id)
+    photo_url = f"https://api.telegram.org/file/bot{API_TOKEN}/{photo_file.file_path}"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(photo_url)
+        photo_bytes = response.content
 
     ticket_data = {
         'type_ticket': 'verification',
@@ -132,13 +145,13 @@ async def process_student_id(message: types.Message, state: FSMContext):
         'wish_group': group,
         'fullname': name,
     }
-    response = await api_service.submit_ticket(ticket_data, message.photo[-1])
-    if response.status_code == 200:
+    response = await api_service.submit_ticket(ticket_data, photo_bytes, 'student_id.jpg')
+    if response.status_code == 201:
         dataa = await api_service.check_active_ticket(tg_chat)
         if dataa:
             await message.answer("Заявка была отправлена ранее")
         else:
-            await message.answer(f"Заявка отправлена на рассмотрение.\nГруппа: {group}\nФИО: {name}\n Фото: {student_id_photo}")
+            await message.answer(f"Заявка отправлена на рассмотрение.\nГруппа: {group}\nФИО: {name}")
     else:
         await message.answer("Ошибка отправки заявки. Пожалуйста, повторите попытку.")
 
@@ -169,7 +182,26 @@ async def ask_admin(callback_query: types.CallbackQuery, state: FSMContext):
 @dp.message(Form.question)
 async def process_question(message: types.Message, state: FSMContext):
     question = message.text
-    tg_chat = message.chat.id
+    await state.update_data(question=question)
+    add_photo_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Да", callback_data="add_photo_yes")],
+            [InlineKeyboardButton(text="Нет", callback_data="add_photo_no")]
+        ]
+    )
+    await state.set_state(Form.add_photo)
+    await message.answer("Хотите добавить фото к вашему вопросу?", reply_markup=add_photo_kb)
+
+@dp.callback_query(lambda c: c.data == "add_photo_yes")
+async def ask_for_photo(callback_query: types.CallbackQuery, state: FSMContext):
+    await state.set_state(Form.question_photo)
+    await bot.send_message(callback_query.from_user.id, "Пожалуйста, отправьте фото:")
+
+@dp.callback_query(lambda c: c.data == "add_photo_no")
+async def submit_question(callback_query: types.CallbackQuery, state: FSMContext):
+    user_data = await state.get_data()
+    question = user_data['question']
+    tg_chat = callback_query.from_user.id
 
     ticket_data = {
         'type_ticket': 'request',
@@ -177,8 +209,35 @@ async def process_question(message: types.Message, state: FSMContext):
         'message': question,
     }
     response = await api_service.submit_ticket(ticket_data)
-    if response.status_code == 200:
-        await message.answer("Ваш вопрос отправлен администратору.")
+    if response.status_code == 201:
+        await bot.send_message(callback_query.from_user.id, "Ваш вопрос был отправлен.")
+    else:
+        await bot.send_message(callback_query.from_user.id, f"Ошибка отправки вопроса. Пожалуйста, повторите попытку. {response.content}")
+
+    await state.clear()
+
+@dp.message(Form.question_photo, F.photo)
+async def process_question_photo(message: types.Message, state: FSMContext):
+    user_data = await state.get_data()
+    question = user_data['question']
+    photo = message.photo[-1]
+    tg_chat = message.chat.id
+
+    photo_file = await bot.get_file(photo.file_id)
+    photo_url = f"https://api.telegram.org/file/bot{API_TOKEN}/{photo_file.file_path}"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(photo_url)
+        photo_bytes = response.content
+
+    ticket_data = {
+        'type_ticket': 'request',
+        'tgchat_id': 111123333333333,
+        'message': question,
+    }
+    response = await api_service.submit_ticket(ticket_data, photo_bytes, 'question_photo.jpg')
+    if response.status_code == 201:
+        await message.answer("Ваш вопрос был отправлен.")
     else:
         await message.answer("Ошибка отправки вопроса. Пожалуйста, повторите попытку.")
 

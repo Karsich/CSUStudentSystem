@@ -34,14 +34,14 @@ class APIService:
         response.raise_for_status()
         return response.json()
 
-    async def submit_ticket(self, ticket_data, photo: UploadFile = None):
+    async def submit_ticket(self, ticket_data, photo_bytes=None, photo_name=None):
         if not self.token:
             await self.update_token()
-        if photo:
-            files = {'photo': (photo.filename, photo.file, photo.content_type)}
-            response = await self.client.post('http://95.174.92.220:8000/tickets', data=ticket_data, files=files, headers=self.headers)
+        if photo_bytes and photo_name:
+            files = {'photo': (photo_name, photo_bytes, 'image/jpeg')}
+            response = await self.client.post('http://95.174.92.220:8000/tickets', data=ticket_data, files=files)
         else:
-            response = await self.client.post('http://95.174.92.220:8000/tickets', data=ticket_data, headers=self.headers)
+            response = await self.client.post('http://95.174.92.220:8000/tickets', data=ticket_data)
         return response
 
     async def check_active_ticket(self, tg_chat):
