@@ -1,5 +1,6 @@
 import httpx
 import logging
+from fastapi import UploadFile
 
 class APIService:
     def __init__(self, login_url, groups_url, login_data):
@@ -33,10 +34,14 @@ class APIService:
         response.raise_for_status()
         return response.json()
 
-    async def submit_ticket(self, ticket_data):
+    async def submit_ticket(self, ticket_data, photo: UploadFile = None):
         if not self.token:
             await self.update_token()
-        response = await self.client.post('http://95.174.92.220:8000/tickets', json=ticket_data, headers=self.headers)
+        if photo:
+            files = {'photo': (photo.filename, photo.file, photo.content_type)}
+            response = await self.client.post('http://95.174.92.220:8000/tickets', data=ticket_data, files=files, headers=self.headers)
+        else:
+            response = await self.client.post('http://95.174.92.220:8000/tickets', data=ticket_data, headers=self.headers)
         return response
 
     async def check_active_ticket(self, tg_chat):

@@ -46,10 +46,12 @@ class Form(StatesGroup):
     group = State()
     name = State()
     student_id = State()
+    question = State()
 
 main_b = [
-    [InlineKeyboardButton(text="Подать заявку в группу", callback_data='fill_form')],
-    [InlineKeyboardButton(text="FAQ", callback_data='FAQ')]
+    [InlineKeyboardButton(text="Подать заявку в группу", callback_data='select_course')],
+    [InlineKeyboardButton(text="FAQ", callback_data='FAQ')],
+    [InlineKeyboardButton(text="Задать вопрос администратору", callback_data='ask_admin')]
 ]
 
 main_kb = InlineKeyboardMarkup(inline_keyboard=main_b)
@@ -72,12 +74,22 @@ async def send_welcome(message: types.Message):
         else:
             await message.answer("Ошибка при запросе: " + str(response.status_code) + " - " + response.text)
 
-@dp.callback_query(lambda c: c.data == "fill_form")
-async def fill_form(callback_query: types.CallbackQuery, state: FSMContext):
-    await state.set_state(Form.group)
+@dp.callback_query(lambda c: c.data == "select_course")
+async def select_course(callback_query: types.CallbackQuery):
+    courses_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"{i} курс", callback_data=f"choose_course_{i}")] for i in range(1, 6)
+        ]
+    )
+    await bot.send_message(callback_query.from_user.id, "Выберите курс:", reply_markup=courses_kb)
+
+@dp.callback_query(lambda c: c.data.startswith("choose_course"))
+async def process_course(callback_query: types.CallbackQuery):
+    course = int(callback_query.data.split("_")[-1])
     await api_service.update_token()
     groups = await api_service.get_groups()
-    groups_kb = await get_groups_kb([item['short_name'] for item in groups])
+    course_groups = [group for group in groups if group['short_name'].split('-')[-1].startswith(str(course))]
+    groups_kb = await get_groups_kb([item['short_name'] for item in course_groups])
     await bot.send_message(callback_query.from_user.id, "Выберите группу:", reply_markup=groups_kb)
 
 @dp.callback_query(lambda c: c.data.startswith("choose_group"))
@@ -90,7 +102,7 @@ async def process_group(callback_query: types.CallbackQuery, state: FSMContext):
     await bot.send_message(callback_query.from_user.id, f"Группа: {group}\nДепартамент: {department}\nСпециальность: {specialty}\nКоличество участников: {members_count}")
     join_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Да", callback_data=f"join_group{group}")],
-        [InlineKeyboardButton(text="Нет", callback_data="fill_form")]
+        [InlineKeyboardButton(text="Нет", callback_data="select_course")]
     ])
     await bot.send_message(callback_query.from_user.id, "Хотите присоединиться к этой группе?", reply_markup=join_kb)
 
@@ -120,7 +132,7 @@ async def process_student_id(message: types.Message, state: FSMContext):
         'wish_group': group,
         'fullname': name,
     }
-    response = await api_service.submit_ticket(ticket_data)
+    response = await api_service.submit_ticket(ticket_data, message.photo[-1])
     if response.status_code == 200:
         dataa = await api_service.check_active_ticket(tg_chat)
         if dataa:
@@ -148,6 +160,29 @@ async def search_faq(message: types.Message):
     results = await api_service.search_faq(query)
     for result in results:
         await message.answer(f"Вопрос: {result['question']}\nОтвет: {result['answer']}")
+
+@dp.callback_query(lambda c: c.data == "ask_admin")
+async def ask_admin(callback_query: types.CallbackQuery, state: FSMContext):
+    await state.set_state(Form.question)
+    await bot.send_message(callback_query.from_user.id, "Введите ваш вопрос:")
+
+@dp.message(Form.question)
+async def process_question(message: types.Message, state: FSMContext):
+    question = message.text
+    tg_chat = message.chat.id
+
+    ticket_data = {
+        'type_ticket': 'request',
+        'tgchat_id': tg_chat,
+        'message': question,
+    }
+    response = await api_service.submit_ticket(ticket_data)
+    if response.status_code == 200:
+        await message.answer("Ваш вопрос отправлен администратору.")
+    else:
+        await message.answer("Ошибка отправки вопроса. Пожалуйста, повторите попытку.")
+
+    await state.clear()
 
 async def get_groups_kb(groups):
     groups_kb = InlineKeyboardMarkup(
